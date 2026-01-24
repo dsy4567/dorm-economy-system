@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <title>DSY小卖部-极致节省版</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 5mm; /* 留出打印机物理边距 */
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+                background-color: #f5f5f5;
+                font-family: "PingFang SC", sans-serif;
+            }
+
+            #print-wrapper {
+                width: 200mm; /* A4 净宽约 210mm */
+                margin: 0 auto;
+                background-color: white;
+                display: grid;
+                grid-template-columns: repeat(5, 1fr); /* 一行5张 */
+                gap: 0; /* 无缝，方便一刀切 */
+                box-sizing: border-box;
+            }
+
+            .ticket {
+                height: 45mm; /* 进一步压缩高度 */
+                border: 0.1pt solid #ccc;
+                padding: 4px 6px;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                overflow: hidden;
+            }
+
+            .title {
+                text-align: center;
+                font-size: 11px;
+                font-weight: bold;
+                border-bottom: 0.5px solid #eee;
+                margin-bottom: 2px;
+            }
+
+            .line {
+                display: flex;
+                align-items: center;
+                margin: 1px 0; /* 极致缩小行间距 */
+                font-size: 9px;
+                line-height: 1.2;
+            }
+
+            .label {
+                white-space: nowrap;
+                color: #444;
+            }
+
+            .fill-space {
+                flex: 1;
+                border-bottom: 0.5px solid #000;
+                margin-left: 2px;
+                height: 10px;
+            }
+
+            .divider {
+                border-top: 0.5px dashed #ddd;
+                margin: 2px 0;
+            }
+
+            .footer {
+                text-align: center;
+                font-size: 8px;
+                color: #999;
+                margin-top: 1px;
+            }
+
+            @media print {
+                .no-print {
+                    display: none;
+                }
+                body {
+                    background: none;
+                }
+                #print-wrapper {
+                    width: 100%;
+                }
+                .ticket {
+                    border: 0.1pt solid #eee;
+                }
+            }
+
+            .no-print {
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: white;
+                padding: 10px;
+                border: 1px solid #66ccff;
+                border-radius: 5px;
+                z-index: 100;
+            }
+
+            button {
+                background: #66ccff;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="no-print">
+            <strong>极致节省模式 (30张/页)</strong><br />
+            数量：<input
+                type="number"
+                id="ticketCount"
+                value="30"
+                style="width: 40px"
+            />
+            <button onclick="renderTickets()">生成</button>
+            <button onclick="window.print()">打印</button>
+        </div>
+
+        <div id="print-wrapper"></div>
+
+        <script>
+            function renderTickets() {
+                const count = document.getElementById("ticketCount").value;
+                const container = document.getElementById("print-wrapper");
+                container.innerHTML = "";
+
+                for (let i = 0; i < count; i++) {
+                    container.innerHTML += `
+                    <div class="ticket">
+                        <div class="title">DSY 的宿舍小卖部</div>
+
+                        <div class="line">
+                            <span class="label">订单号:</span>
+                            <div class="fill-space"></div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <div class="line"><span class="label">实付现金:</span><div class="fill-space"></div></div>
+                        <div class="line"><span class="label">实付积分:</span><div class="fill-space"></div></div>
+                        <div class="line"><span class="label">奖励积分:</span><div class="fill-space"></div></div>
+
+                        <div class="divider"></div>
+
+                        <div class="line">
+                            <span class="label">校验码:</span>
+                            <div class="fill-space"></div>
+                        </div>
+
+                        <div class="footer">谢谢惠顾，凭小票申请售后</div>
+                    </div>
+                `;
+                }
+            }
+            renderTickets();
+        </script>
+    </body>
+</html>

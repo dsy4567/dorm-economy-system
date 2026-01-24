@@ -1,0 +1,46 @@
+# 依赖管理
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# 敏感数据文件 - 这些包含实际的业务数据
+data/
+backups/
+
+# 临时文件
+temp.js
+*.tmp
+*.temp
+
+# 日志文件
+*.log
+logs/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 备份文件
+*.bak
+*.backup
+
+# 测试相关
+coverage/
+.nyc_output/
+
+# 其他
+.cache/
+.parcel-cache/

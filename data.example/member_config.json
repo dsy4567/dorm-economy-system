@@ -1,0 +1,12 @@
+{
+    "description": "会员配置文件，包含手动指定的正式会员有效期和特殊用户",
+    "members": {
+        "ysd": "2099-12-31T23:59:59.000Z"
+    },
+    "specialUsers": ["dsy"],
+    "pointRates": {
+        "SPECIAL": 0,
+        "TRAINEE": 0.5,
+        "OFFICIAL": 1.0
+    }
+}

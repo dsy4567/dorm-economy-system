@@ -1,0 +1,16 @@
+{
+    "name": "dorm-store-system",
+    "version": "1.0.0",
+    "description": "宿舍小卖部营销系统",
+    "main": "dist/main.js",
+    "scripts": {
+        "start": "node dist/main.js",
+        "build": "tsc",
+        "watch": "tsc -w",
+        "vc": "node dist/verify-code-generator.js"
+    },
+    "dependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    }
+}

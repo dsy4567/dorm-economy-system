@@ -1,0 +1,18 @@
+{
+    "DATA_DIR": "./data",
+    "SALT": "114514",
+    "MEMBER": {
+        "TRIGGER_AMOUNT": 10,
+        "REWARD_DAYS": 14,
+        "MAX_DAYS": 21,
+        "ALERT_DAYS": 3,
+        "NEW_RULE": {
+            "ENABLED": true,
+            "LOOKBACK_DAYS": 21,
+            "TRIGGER_AMOUNT": 13,
+            "REWARD_DAYS": 7
+        }
+    },
+    "REFUND_LIMIT_DAYS": 7,
+    "MAX_POINTS": 5
+}

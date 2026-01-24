@@ -1,0 +1,59 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "DormStore Product List",
+    "type": "object",
+    "description": "Array of product items matching StoreData.products structure",
+    "properties": {
+        "data": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Custom unique product ID (e.g., 'noodle_01')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name of the product"
+                    },
+                    "cost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Cost in yuan (used for profit calculation, immutable in order snapshot)"
+                    },
+                    "initialStock": {
+                        "type": "number",
+                        "description": "Initial stock quantity (integer in logic)"
+                    },
+                    "prices": {
+                        "type": "object",
+                        "description": "Prices for different shelves",
+                        "properties": {
+                            "cash": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "Cash shelf price (optional)"
+                            },
+                            "points": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "Points mall price (optional)"
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "promoIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional: Array of linked promotion template IDs"
+                    }
+                },
+                "required": ["id", "name", "cost", "initialStock", "prices"],
+                "additionalProperties": false
+            }
+        }
+    }
+}

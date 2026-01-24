@@ -1,0 +1,58 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "DormStore Promotion Templates",
+    "type": "object",
+    "description": "Array of promotion templates",
+    "properties": {
+        "data": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Unique promotion template ID"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Promotion display name"
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["quantity_based", "amount_based"],
+                        "description": "Promotion type: quantity_based (buy x get y points) or amount_based (spend x yuan get y points)"
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Threshold value (quantity or amount)"
+                    },
+                    "rewardPoints": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Points to reward when threshold is reached"
+                    },
+                    "weeklyLimitPerProduct": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Weekly limit per product (number of bags eligible for promotion)"
+                    },
+                    "isMemberOnly": {
+                        "type": "boolean",
+                        "description": "Whether the promotion is only for members"
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "type",
+                    "threshold",
+                    "rewardPoints",
+                    "weeklyLimitPerProduct",
+                    "isMemberOnly"
+                ],
+                "additionalProperties": false
+            }
+        }
+    }
+}

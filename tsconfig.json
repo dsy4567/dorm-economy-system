@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "target": "ES2022", // 编译目标版本，我的nodejs足够新
+        "module": "commonjs", // 模块系统
+        "outDir": "./dist", // 编译后的文件放在 dist 文件夹
+        "rootDir": "./src", // 源代码在 src 文件夹
+        "strict": true, // 开启严格检查
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "allowJs": true // 允许导入 JavaScript 文件
+    },
+    "include": ["src/**/*", "data/**/*"]
+}

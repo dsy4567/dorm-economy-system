@@ -1,0 +1,21 @@
+{
+    "users": [
+        {
+            "shortName": "ysd",
+            "points": 0,
+            "debt": 0,
+            "totalSpent": 4,
+            "hasDrawnNewbiePool": false
+        },
+        {
+            "shortName": "dsy",
+            "points": 0,
+            "debt": 0,
+            "totalSpent": 0,
+            "hasDrawnNewbiePool": false
+        }
+    ],
+    "orders": [],
+    "refunds": [],
+    "otherLogs": []
+}

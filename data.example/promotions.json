@@ -1,0 +1,59 @@
+{
+  "$schema": "../schemas/promotion-schema.json",
+  "data": [
+    {
+      "id": "2b_0.5jf",
+      "name": "买2包返0.5积分",
+      "type": "quantity_based",
+      "threshold": 2,
+      "rewardPoints": 0.5,
+      "weeklyLimitPerProduct": 8,
+      "isMemberOnly": true
+    },
+    {
+      "id": "3b_0.5jf",
+      "name": "买3包返0.5积分",
+      "type": "quantity_based",
+      "threshold": 3,
+      "rewardPoints": 0.5,
+      "weeklyLimitPerProduct": 99999,
+      "isMemberOnly": true
+    },
+    {
+      "id": "1b_0.5jf",
+      "name": "买1包返0.5积分",
+      "type": "quantity_based",
+      "threshold": 1,
+      "rewardPoints": 0.5,
+      "weeklyLimitPerProduct": 9999,
+      "isMemberOnly": true
+    },
+    {
+      "id": "1b_0.2jf",
+      "name": "买1包返0.2积分",
+      "type": "quantity_based",
+      "threshold": 1,
+      "rewardPoints": 0.2,
+      "weeklyLimitPerProduct": 9999,
+      "isMemberOnly": true
+    },
+    {
+      "id": "1b_0.3jf",
+      "name": "买1包返0.3积分",
+      "type": "quantity_based",
+      "threshold": 1,
+      "rewardPoints": 0.3,
+      "weeklyLimitPerProduct": 9999,
+      "isMemberOnly": true
+    },
+    {
+      "id": "1b_0.25jf",
+      "name": "买1包返0.25积分",
+      "type": "quantity_based",
+      "threshold": 1,
+      "rewardPoints": 0.25,
+      "weeklyLimitPerProduct": 9999,
+      "isMemberOnly": true
+    }
+  ]
+}
