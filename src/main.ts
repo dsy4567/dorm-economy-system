@@ -54,6 +54,7 @@
 //      - showCurrentSessionCashRevenue(): 显示当前会话累计实付现金（扣除退款）
 //    - reverseLookupVerifyCode(): 校验码反查订单（从最晚订单向前遍历）
 //    - exportDebtorList(): 在控制台输出赊账名单（包含最后消费时间）
+//    - manageInventory(): 库存管理（支持上架新品、调整库存、修改优惠策略、修改价格）
 //
 // 4. 关键变量
 //    - config: 系统配置
@@ -191,6 +192,7 @@ interface RefundOrder {
     originalOrderId: string;
     timestamp: Date;
     userShortName: string;
+    quantity: number; // 本次退款数量
     refundCash: number; // 记录退还了多少现金
     refundPoints: number; // 记录退还了多少积分
     deductPoints: number; // 记录扣除了多少赠送积分
@@ -494,36 +496,27 @@ class DormStoreSystem {
                 currentStock -= o.quantity;
             });
 
-        // 加上所有已退款的数量
+        // 加上所有已退款的数量（直接使用退款数量，不再计算比例）
         this.data.refunds.forEach(r => {
             const originalOrder = this.data.orders.find(
                 o => o.id === r.originalOrderId,
             );
             if (originalOrder && originalOrder.productId === productId) {
-                let ratio: number;
-
-                // 计算退款比例对应的数量（防御性编程：避免除零错误）
-                if (originalOrder.paidCash === 0) {
-                    // 积分支付或其他非现金支付的情况
-                    if (originalOrder.paidPoints === 0) {
-                        // 免费订单，全额退款
-                        ratio = 1;
-                    } else {
-                        // 按积分退款比例计算
-                        ratio = r.refundPoints / originalOrder.paidPoints;
-                    }
-                } else {
-                    // 现金支付的情况
-                    ratio = r.refundCash / originalOrder.paidCash;
-                }
-
-                // 确保比例在合理范围内
-                ratio = Math.max(0, Math.min(1, ratio));
-                currentStock += Math.round(originalOrder.quantity * ratio);
+                // 直接使用退款数量，避免比例计算错误
+                currentStock += r.quantity;
             }
         });
 
-        return Math.max(0, currentStock); // 确保库存不为负
+        // 检查库存是否为负，如果是则发出警告
+        if (currentStock < 0) {
+            const product = this.data.products.find(p => p.id === productId);
+            console.warn(
+                `⚠️ 警告：商品 ${product?.name} (${productId}) 库存出现负数: ${currentStock}`,
+            );
+            console.warn(`   请检查订单和退款记录是否存在数据不一致`);
+        }
+
+        return currentStock; // 返回实际计算结果，允许负数以便发现问题
     }
 
     // --- 辅助函数 ---
@@ -1840,6 +1833,27 @@ class DormStoreSystem {
             const pCash = parseFloat(await this.ask("现金售价: "));
             const pPoints = parseFloat(await this.ask("积分售价: "));
 
+            // 显示所有可用优惠策略
+            console.log("\n--- 可用优惠策略 ---");
+            this.data.promotions.forEach((promo, index) => {
+                console.log(`[${index + 1}] ${promo.name} (${promo.id})`);
+            });
+
+            const promoInput = await this.ask(
+                "选择优惠策略序号（逗号分隔，留空不设置）: ",
+            );
+            const promoIds: string[] = [];
+            if (promoInput.trim() !== "") {
+                const selectedIndices = promoInput
+                    .split(",")
+                    .map(s => parseInt(s.trim()) - 1);
+                for (const index of selectedIndices) {
+                    if (index >= 0 && index < this.data.promotions.length) {
+                        promoIds.push(this.data.promotions[index].id);
+                    }
+                }
+            }
+
             const newProd: Product = {
                 id: newId,
                 name,
@@ -1849,39 +1863,163 @@ class DormStoreSystem {
                     [ProductShelf.CASH]: pCash || undefined,
                     [ProductShelf.POINTS]: pPoints || undefined,
                 },
+                promoIds: promoIds.length > 0 ? promoIds : undefined,
             };
             this.data.products.push(newProd);
             this.saveData();
             console.log("✅ 上架成功");
         } else {
-            // 修改初始库存
+            // 修改现有商品
             const prod = this.data.products.find(p => p.id === prodId);
             if (!prod) {
                 console.log("商品不存在");
                 return;
             }
 
+            console.log(`\n当前商品信息:`);
+            console.log(`名称: ${prod.name} [${prod.id}]`);
+            console.log(`成本: ￥${prod.cost.toFixed(2)}`);
+            console.log(`现金售价: ￥${prod.prices.cash?.toFixed(2) || "无"}`);
+            console.log(
+                `积分售价: ${prod.prices.points?.toFixed(2) || "无"} 积分`,
+            );
             console.log(`当前初始库存: ${prod.initialStock}`);
             console.log(`当前实际库存: ${this.calculateCurrentStock(prod.id)}`);
 
-            const newStock = parseInt(await this.ask("输入新的初始库存: "));
-            const oldStock = prod.initialStock;
-            prod.initialStock = newStock;
+            // 显示当前优惠策略
+            if (prod.promoIds && prod.promoIds.length > 0) {
+                console.log(
+                    `当前优惠策略: ${prod.promoIds
+                        .map(id => {
+                            const promo = this.data.promotions.find(
+                                p => p.id === id,
+                            );
+                            return promo ? promo.name : id;
+                        })
+                        .join(", ")}`,
+                );
+            } else {
+                console.log("当前优惠策略: 无");
+            }
 
-            // 记录库存调整日志
-            const inventoryLog: OtherLog = {
-                id: this.generateId("MAN"),
-                timestamp: new Date(),
-                type: "inventory_adjust",
-                amount: newStock - oldStock,
-                reason: `手动调整库存: ${prod.name} (${prod.id}) 从 ${oldStock} 改为 ${newStock}`,
-                productId: prod.id,
-            };
-            this.data.otherLogs.push(inventoryLog);
+            console.log("\n--- 操作选项 ---");
+            console.log("1. 调整库存");
+            console.log("2. 修改优惠策略");
+            console.log("3. 修改价格");
 
-            this.saveData();
-            console.log("✅ 初始库存已更新");
-            console.log(`新的实际库存: ${this.calculateCurrentStock(prod.id)}`);
+            const option = await this.ask("选择操作 (1-3): ");
+
+            if (option === "1") {
+                // 调整库存
+                const adjustmentInput = await this.ask(
+                    "请输入调整数量（正数为补货，负数为损耗/下架）: ",
+                );
+                const adjustment = parseInt(adjustmentInput);
+
+                if (isNaN(adjustment)) {
+                    console.log("❌ 请输入有效的数字");
+                    return;
+                }
+
+                const oldStock = prod.initialStock;
+                const newStock = oldStock + adjustment;
+
+                if (newStock < 0) {
+                    console.log("❌ 调整后库存不能为负数");
+                    return;
+                }
+
+                prod.initialStock = newStock;
+
+                // 记录库存调整日志
+                const inventoryLog: OtherLog = {
+                    id: this.generateId("MAN"),
+                    timestamp: new Date(),
+                    type: "inventory_adjust",
+                    amount: adjustment,
+                    reason:
+                        adjustment >= 0
+                            ? `补货: ${prod.name} (${prod.id}) 增加 ${adjustment} 件`
+                            : `损耗/下架: ${prod.name} (${prod.id}) 减少 ${Math.abs(adjustment)} 件`,
+                    productId: prod.id,
+                };
+                this.data.otherLogs.push(inventoryLog);
+
+                this.saveData();
+                console.log("✅ 库存已更新");
+                console.log(`新的初始库存: ${newStock}`);
+                console.log(
+                    `新的实际库存: ${this.calculateCurrentStock(prod.id)}`,
+                );
+            } else if (option === "2") {
+                // 修改优惠策略
+                console.log("\n--- 可用优惠策略 ---");
+                this.data.promotions.forEach((promo, index) => {
+                    console.log(`[${index + 1}] ${promo.name} (${promo.id})`);
+                });
+
+                const promoInput = await this.ask(
+                    "选择优惠策略序号（逗号分隔，留空清空）: ",
+                );
+                if (promoInput.trim() === "") {
+                    prod.promoIds = undefined;
+                    console.log("✅ 已清空优惠策略");
+                } else {
+                    const selectedIndices = promoInput
+                        .split(",")
+                        .map(s => parseInt(s.trim()) - 1);
+                    const promoIds: string[] = [];
+                    for (const index of selectedIndices) {
+                        if (index >= 0 && index < this.data.promotions.length) {
+                            promoIds.push(this.data.promotions[index].id);
+                        }
+                    }
+                    prod.promoIds = promoIds;
+                    console.log(
+                        `✅ 已设置优惠策略: ${promoIds
+                            .map(id => {
+                                const promo = this.data.promotions.find(
+                                    p => p.id === id,
+                                );
+                                return promo ? promo.name : id;
+                            })
+                            .join(", ")}`,
+                    );
+                }
+
+                this.saveData();
+            } else if (option === "3") {
+                // 修改价格
+                const newCashPrice =
+                    await this.ask("新的现金售价（留空保持不变）: ");
+                const newPointsPrice =
+                    await this.ask("新的积分售价（留空保持不变）: ");
+
+                if (newCashPrice.trim() !== "") {
+                    const cashPrice = parseFloat(newCashPrice);
+                    if (!isNaN(cashPrice)) {
+                        prod.prices.cash = cashPrice;
+                        console.log(
+                            `✅ 现金售价已更新为: ￥${cashPrice.toFixed(2)}`,
+                        );
+                    }
+                }
+
+                if (newPointsPrice.trim() !== "") {
+                    const pointsPrice = parseFloat(newPointsPrice);
+                    if (!isNaN(pointsPrice)) {
+                        prod.prices.points = pointsPrice;
+                        console.log(
+                            `✅ 积分售价已更新为: ${pointsPrice.toFixed(2)} 积分`,
+                        );
+                    }
+                }
+
+                this.saveData();
+            } else {
+                console.log("❌ 无效选项");
+                return;
+            }
         }
     }
 
@@ -1909,12 +2047,31 @@ class DormStoreSystem {
         )!;
 
         console.log(`订单: ${order.productName} x ${order.quantity}`);
+
+        // 检查历史退款记录，计算已退款数量
+        const existingRefunds = this.data.refunds.filter(
+            r => r.originalOrderId === order.id,
+        );
+        const alreadyRefundedQty = existingRefunds.reduce(
+            (sum, refund) => sum + (refund.quantity || 0),
+            0,
+        );
+
+        console.log(`已退款数量: ${alreadyRefundedQty}/${order.quantity}`);
+
         const qtyInput = await this.ask("输入退款数量: ");
         const qty = parseInt(qtyInput);
 
         // 强制要求退款数量必须是整数
-        if (qtyInput !== qty.toString() || qty <= 0 || qty > order.quantity) {
-            console.log("❌ 数量无效，必须输入正整数且不超过订单数量");
+        if (qtyInput !== qty.toString() || qty <= 0) {
+            console.log("❌ 数量无效，必须输入正整数");
+            return;
+        }
+
+        // 校验本次申请数量 + 历史已退总数 <= 订单原始数量
+        if (qty + alreadyRefundedQty > order.quantity) {
+            console.log("❌ 退款数量超过订单剩余可退数量");
+            console.log(`可退数量: ${order.quantity - alreadyRefundedQty}`);
             return;
         }
 
@@ -1970,6 +2127,7 @@ class DormStoreSystem {
             originalOrderId: order.id,
             timestamp: new Date(),
             userShortName: user.shortName,
+            quantity: qty, // 本次退款数量
             refundCash, // 仅记录
             refundPoints,
             deductPoints: deductRewardPoints,
