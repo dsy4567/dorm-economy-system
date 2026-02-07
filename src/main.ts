@@ -1114,7 +1114,7 @@ class DormStoreSystem {
     }
 
     /**
-     * 满消费送商品计算
+     * 满消费送商品计算（基于本次进店）
      * @param userShortName 用户简称
      */
     private calculateGiftPromotion(userShortName: string): void {
@@ -1125,16 +1125,23 @@ class DormStoreSystem {
 
         console.log("\n=== 🎁 满消费送商品 ===");
 
-        // 使用系统启动时间作为会话开始时间
-        const sessionStartTime = this.systemStartTime;
+        // 获取用户本次进店的订单
+        const currentVisitOrders = this.getCurrentVisitOrders(userShortName);
 
-        // 计算当前用户在当前会话中的现金订单实付总额
-        const cashOrders = this.data.orders.filter(
-            order =>
-                order.userShortName === userShortName &&
-                order.type === "cash" &&
-                order.timestamp >= sessionStartTime,
+        if (currentVisitOrders.length === 0) {
+            console.log("您当前不在店内，或本次进店暂无订单");
+            return;
+        }
+
+        // 筛选本次进店的现金订单
+        const cashOrders = currentVisitOrders.filter(
+            order => order.type === "cash",
         );
+
+        if (cashOrders.length === 0) {
+            console.log("本次进店暂无现金订单");
+            return;
+        }
 
         // 计算实付现金总额（扣除退款）
         let totalPaidCash = 0;
@@ -1181,39 +1188,51 @@ class DormStoreSystem {
 
             if (giftProduct) {
                 console.log(
-                    `🎊 恭喜！您在当前会话消费了 ￥${totalPaidCash.toFixed(2)}`,
+                    `🎊 恭喜！您本次进店消费了 ￥${totalPaidCash.toFixed(2)}`,
                 );
                 console.log(
                     `🎁 应获得赠品: ${giftProduct.name} x ${giftCount} 包`,
                 );
             } else {
                 console.log(
-                    `🎊 恭喜！您在当前会话消费了 ￥${totalPaidCash.toFixed(2)}`,
+                    `🎊 恭喜！您本次进店消费了 ￥${totalPaidCash.toFixed(2)}`,
                 );
                 console.log(
                     `🎁 应获得赠品: ${config.GIFT_PROMOTION.PRODUCT_ID} x ${giftCount} 包`,
                 );
             }
+        } else {
+            console.log(`本次进店消费: ￥${totalPaidCash.toFixed(2)}`);
+            console.log(
+                `满${strategy}元送1包，还需消费 ￥${(strategy - totalPaidCash).toFixed(2)}`,
+            );
         }
     }
 
     /**
-     * 展示当前会话累计实付现金（不含积分）
+     * 展示本次进店累计实付现金（不含积分）
      * @param userShortName 用户简称
      */
     private showCurrentSessionCashRevenue(userShortName: string): void {
-        console.log("\n=== 💰 当前会话累计实付现金 ===");
+        console.log("\n=== 💰 本次进店累计实付现金 ===");
 
-        // 使用系统启动时间作为会话开始时间
-        const sessionStartTime = this.systemStartTime;
+        // 获取用户本次进店的订单
+        const currentVisitOrders = this.getCurrentVisitOrders(userShortName);
 
-        // 计算当前用户在当前会话中的现金订单实付总额
-        const cashOrders = this.data.orders.filter(
-            order =>
-                order.userShortName === userShortName &&
-                order.type === "cash" &&
-                order.timestamp >= sessionStartTime,
+        if (currentVisitOrders.length === 0) {
+            console.log("您当前不在店内，或本次进店暂无订单");
+            return;
+        }
+
+        // 筛选本次进店的现金订单
+        const cashOrders = currentVisitOrders.filter(
+            order => order.type === "cash",
         );
+
+        if (cashOrders.length === 0) {
+            console.log("本次进店暂无现金订单");
+            return;
+        }
 
         // 计算实付现金总额（扣除退款）
         let totalPaidCash = 0;
@@ -1238,33 +1257,36 @@ class DormStoreSystem {
         console.log(
             `用户: ${userShortName} (${this.getRealName(userShortName)})`,
         );
-        console.log(`当前会话累计实付现金: ￥${totalPaidCash.toFixed(2)}`);
+        console.log(`本次进店累计实付现金: ￥${totalPaidCash.toFixed(2)}`);
+        console.log(`订单数量: ${cashOrders.length} 单`);
 
-        if (cashOrders.length > 0) {
-            console.log(`订单数量: ${cashOrders.length} 单`);
+        // 显示本次进店的时间范围
+        const startTime = currentVisitOrders[0].timestamp;
+        const endTime =
+            currentVisitOrders[currentVisitOrders.length - 1].timestamp;
+        console.log(`进店时间: ${startTime.toLocaleString("zh-CN")}`);
+        console.log(`最后订单: ${endTime.toLocaleString("zh-CN")}`);
 
-            // 显示订单详情（可选）
-            console.log("\n订单详情:");
-            cashOrders.forEach(order => {
-                const orderRefunds = this.data.refunds.filter(
-                    refund => refund.originalOrderId === order.id,
-                );
-                const totalRefund = orderRefunds.reduce(
-                    (sum, refund) => sum + refund.refundCash,
-                    0,
-                );
-                const effectiveAmount = Math.max(
-                    0,
-                    order.paidCash - totalRefund,
-                );
+        // 显示订单详情
+        console.log("\n订单详情:");
+        cashOrders.forEach(order => {
+            const orderRefunds = this.data.refunds.filter(
+                refund => refund.originalOrderId === order.id,
+            );
+            const totalRefund = orderRefunds.reduce(
+                (sum, refund) => sum + refund.refundCash,
+                0,
+            );
+            const effectiveAmount = Math.max(0, order.paidCash - totalRefund);
 
-                console.log(
-                    `  ${order.productName} x ${order.quantity} - 实付: ￥${effectiveAmount.toFixed(2)}`,
-                );
-            });
-        } else {
-            console.log("当前会话无现金订单");
-        }
+            console.log(
+                `  ${order.timestamp.toLocaleTimeString("zh-CN")} ${order.productName} x ${order.quantity} - 实付: ￥${effectiveAmount.toFixed(2)}`,
+            );
+        });
+
+        // 检查是否在店状态
+        const isInStore = this.isUserInStore(userShortName);
+        console.log(`\n当前状态: ${isInStore ? "🟢 在店中" : "🔴 已离店"}`);
     }
 
     // --- 现金购物 ---
@@ -2556,7 +2578,114 @@ class DormStoreSystem {
     }
 
     /**
-     * 查询指定顾客21天消费记录
+     * 按3分钟间隔分组订单（本次进店定义）
+     * @param orders 订单数组
+     * @returns 分组后的订单数组
+     */
+    private groupOrdersByVisit(orders: Order[]): Order[][] {
+        if (orders.length === 0) return [];
+
+        // 按时间排序
+        const sortedOrders = [...orders].sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+        );
+
+        const groups: Order[][] = [];
+        let currentGroup: Order[] = [sortedOrders[0]];
+
+        for (let i = 1; i < sortedOrders.length; i++) {
+            const currentOrder = sortedOrders[i];
+            const previousOrder = sortedOrders[i - 1];
+            const timeDiff =
+                currentOrder.timestamp.getTime() -
+                previousOrder.timestamp.getTime();
+
+            if (timeDiff <= 3 * 60 * 1000) {
+                // 3分钟
+                // 时间间隔小于3分钟，加入当前组
+                currentGroup.push(currentOrder);
+            } else {
+                // 时间间隔超过3分钟，开始新组
+                groups.push(currentGroup);
+                currentGroup = [currentOrder];
+            }
+        }
+
+        // 添加最后一组
+        if (currentGroup.length > 0) {
+            groups.push(currentGroup);
+        }
+
+        return groups;
+    }
+
+    /**
+     * 检查用户是否在店（最晚订单在3分钟内）
+     * @param userShortName 用户简称
+     * @returns 是否在店
+     */
+    private isUserInStore(userShortName: string): boolean {
+        const userOrders = this.data.orders.filter(
+            o => o.userShortName === userShortName,
+        );
+
+        if (userOrders.length === 0) return false;
+
+        // 找到最晚的订单
+        const latestOrder = userOrders.reduce((latest, order) =>
+            order.timestamp > latest.timestamp ? order : latest,
+        );
+
+        const timeDiff = Date.now() - latestOrder.timestamp.getTime();
+        return timeDiff <= 3 * 60 * 1000; // 3分钟内
+    }
+
+    /**
+     * 获取用户本次进店的订单
+     * @param userShortName 用户简称
+     * @returns 本次进店的订单数组
+     */
+    private getCurrentVisitOrders(userShortName: string): Order[] {
+        if (!this.isUserInStore(userShortName)) {
+            return [];
+        }
+
+        const userOrders = this.data.orders.filter(
+            o => o.userShortName === userShortName,
+        );
+
+        if (userOrders.length === 0) return [];
+
+        // 按时间排序
+        const sortedOrders = [...userOrders].sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+        );
+
+        // 找到最晚的订单
+        const latestOrder = sortedOrders[sortedOrders.length - 1];
+
+        // 从最晚订单向前找连续订单
+        const currentVisitOrders: Order[] = [latestOrder];
+
+        for (let i = sortedOrders.length - 2; i >= 0; i--) {
+            const currentOrder = sortedOrders[i];
+            const nextOrder = sortedOrders[i + 1];
+            const timeDiff =
+                nextOrder.timestamp.getTime() -
+                currentOrder.timestamp.getTime();
+
+            if (timeDiff <= 3 * 60 * 1000) {
+                currentVisitOrders.unshift(currentOrder);
+            } else {
+                break;
+            }
+        }
+
+        return currentVisitOrders;
+    }
+
+    /**
+     * 查询指定顾客21天消费记录（按进店分组）
      */
     public async queryCustomerConsumption(): Promise<void> {
         console.log("\n=== 🔍 查询顾客消费记录 ===");
@@ -2608,6 +2737,13 @@ class DormStoreSystem {
         console.log(`当前积分: ${user.points}`);
         console.log(`当前欠款: ￥${user.debt.toFixed(2)}`);
 
+        // 按进店分组显示消费记录
+        const visitGroups = this.groupOrdersByVisit(userOrdersInPeriod);
+
+        console.log(
+            `\n--- 21天消费记录 (共${userOrdersInPeriod.length}笔，${visitGroups.length}次进店) ---`,
+        );
+
         // 计算消费统计
         let totalCashSpent = 0;
         let totalPointsSpent = 0;
@@ -2616,57 +2752,75 @@ class DormStoreSystem {
         let totalRefundPoints = 0;
         let totalDeductedPoints = 0;
 
-        // 显示消费记录
-        console.log(
-            `\n--- 21天消费记录 (共${userOrdersInPeriod.length}笔) ---`,
-        );
-        console.log(
-            "订单号\t\t时间\t\t\t商品\t\t\t类型\t数量\t实付金额\t奖励积分\t备注",
-        );
-        console.log("-".repeat(120));
-
-        userOrdersInPeriod.forEach(order => {
-            // 查找该订单的退款记录
-            const refunds = this.data.refunds.filter(
-                r => r.originalOrderId === order.id,
+        visitGroups.forEach((visitOrders, visitIndex) => {
+            console.log(
+                `\n📅 进店 ${visitIndex + 1} (${visitOrders.length}笔订单):`,
             );
-            const refundCash = refunds.reduce(
-                (sum, r) => sum + r.refundCash,
-                0,
+            console.log(
+                `   开始时间: ${visitOrders[0].timestamp.toLocaleString("zh-CN")}`,
             );
-            const refundPoints = refunds.reduce(
-                (sum, r) => sum + r.refundPoints,
-                0,
-            );
-            const deductedPoints = refunds.reduce(
-                (sum, r) => sum + r.deductPoints,
-                0,
+            console.log(
+                `   结束时间: ${visitOrders[visitOrders.length - 1].timestamp.toLocaleString("zh-CN")}`,
             );
 
-            // 累计统计
-            totalCashSpent += order.paidCash - refundCash;
-            totalPointsSpent += order.paidPoints - refundPoints;
-            totalRewardPoints += order.rewardPoints - deductedPoints;
-            totalRefundCash += refundCash;
-            totalRefundPoints += refundPoints;
-            totalDeductedPoints += deductedPoints;
+            let visitCashSpent = 0;
+            let visitPointsSpent = 0;
+            let visitRewardPoints = 0;
 
-            // 格式化显示
-            const orderType = order.type === "cash" ? "现金" : "积分";
-            const payment =
-                order.type === "cash"
-                    ? `￥${(order.paidCash - refundCash).toFixed(2)}`
-                    : `${(order.paidPoints - refundPoints).toFixed(2)}积分`;
-            const rewardPoints = order.rewardPoints - deductedPoints;
+            visitOrders.forEach(order => {
+                // 查找该订单的退款记录
+                const refunds = this.data.refunds.filter(
+                    r => r.originalOrderId === order.id,
+                );
+                const refundCash = refunds.reduce(
+                    (sum, r) => sum + r.refundCash,
+                    0,
+                );
+                const refundPoints = refunds.reduce(
+                    (sum, r) => sum + r.refundPoints,
+                    0,
+                );
+                const deductedPoints = refunds.reduce(
+                    (sum, r) => sum + r.deductPoints,
+                    0,
+                );
 
-            // 截断过长的商品名称
-            const productName =
-                order.productName.length > 10
-                    ? order.productName.substring(0, 9) + "..."
-                    : order.productName;
+                // 累计统计
+                const effectiveCash = order.paidCash - refundCash;
+                const effectivePoints = order.paidPoints - refundPoints;
+                const effectiveReward = order.rewardPoints - deductedPoints;
+
+                visitCashSpent += effectiveCash;
+                visitPointsSpent += effectivePoints;
+                visitRewardPoints += effectiveReward;
+
+                totalCashSpent += effectiveCash;
+                totalPointsSpent += effectivePoints;
+                totalRewardPoints += effectiveReward;
+                totalRefundCash += refundCash;
+                totalRefundPoints += refundPoints;
+                totalDeductedPoints += deductedPoints;
+
+                // 格式化显示
+                const orderType = order.type === "cash" ? "现金" : "积分";
+                const payment =
+                    order.type === "cash"
+                        ? `￥${effectiveCash.toFixed(2)}`
+                        : `${effectivePoints.toFixed(2)}积分`;
+
+                // 截断过长的商品名称
+                const productName =
+                    order.productName.length > 10
+                        ? order.productName.substring(0, 9) + "..."
+                        : order.productName;
+
+                console.log(
+                    `   ${order.timestamp.toLocaleTimeString("zh-CN")} ${productName} x${order.quantity} ${orderType} ${payment}`,
+                );
+            });
 
             console.log(
-                `${order.id}\t${order.timestamp.toLocaleString("zh-CN")}\t${productName}\t\t${orderType}\t${order.quantity}\t${payment}\t\t${rewardPoints}\t\t${order.note || ""}`,
+                `   本次进店消费: ￥${visitCashSpent.toFixed(2)} + ${visitPointsSpent.toFixed(2)}积分`,
             );
         });
 
