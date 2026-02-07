@@ -52,9 +52,15 @@
 //      - showRevenueOverview(): 显示收入情况分析
 //      - calculateRewardPoints(): 计算奖励积分（保留完整小数，但用户总积分有上限5）
 //      - showCurrentSessionCashRevenue(): 显示当前会话累计实付现金（扣除退款）
+//      - calculateGiftPromotion(): 计算满消费送商品的数量
 //    - reverseLookupVerifyCode(): 校验码反查订单（从最晚订单向前遍历）
 //    - exportDebtorList(): 在控制台输出赊账名单（包含最后消费时间）
+//    - queryCustomerConsumption(): 查询指定顾客21天消费记录
 //    - manageInventory(): 库存管理（支持上架新品、调整库存、修改优惠策略、修改价格）
+//    - 系统运行控制
+//      - checkProcessLock(): 检查进程锁，确保只能同时运行一个进程
+//    - 看板功能
+//      - showProductDashboard(): 展示商品看板，包含近2小时销量统计
 //
 // 4. 关键变量
 //    - config: 系统配置
@@ -85,6 +91,14 @@ interface Config {
     };
     REFUND_LIMIT_DAYS: number;
     MAX_POINTS: number; // 积分上限配置
+    GIFT_PROMOTION: {
+        ENABLED: boolean;
+        PRODUCT_ID: string;
+        STRATEGIES: {
+            TRAINEE: number;
+            OFFICIAL: number;
+        };
+    };
 }
 
 // 读取配置文件
@@ -110,13 +124,6 @@ const config: Config = JSON.parse(
 
 // 会员类型定义
 type MemberLevel = "SPECIAL" | "TRAINEE" | "OFFICIAL";
-
-// 积分倍率配置
-const rateMap: Record<MemberLevel, number> = {
-    SPECIAL: 0, // 死党不给积分
-    TRAINEE: 0.2, // 见习 20%
-    OFFICIAL: 1.0, // 正式 100%
-};
 
 interface MemberConfig {
     description: string;
@@ -231,6 +238,9 @@ class DormStoreSystem {
         // 记录系统启动时间，用于会话统计
         this.systemStartTime = new Date();
 
+        // 实现进程锁
+        this.checkProcessLock();
+
         this.dataPath = path.resolve(
             process.cwd(),
             config.DATA_DIR,
@@ -267,6 +277,69 @@ class DormStoreSystem {
             output: process.stdout,
         });
         this.init();
+    }
+
+    /**
+     * 检查进程锁，确保只能同时运行一个进程
+     */
+    private checkProcessLock(): void {
+        const pidFilePath = path.resolve(
+            process.cwd(),
+            config.DATA_DIR,
+            "app.pid",
+        );
+
+        // 检查是否存在PID文件
+        if (fs.existsSync(pidFilePath)) {
+            try {
+                // 读取PID文件内容
+                const pidContent = fs.readFileSync(pidFilePath, "utf-8");
+                const pid = parseInt(pidContent.trim());
+
+                // 检查进程是否存在
+                process.kill(pid, 0); // 发送信号0，不执行任何操作，只检查进程是否存在
+
+                // 如果进程存在，提示用户
+                console.error(`❌ 程序已经在运行中 (PID: ${pid})`);
+                console.error(`请执行以下命令终止现有进程:`);
+                console.error(`kill ${pid}`);
+                process.exit(1);
+            } catch (error) {
+                // 如果进程不存在或读取失败，删除旧的PID文件
+                fs.unlinkSync(pidFilePath);
+            }
+        }
+
+        // 创建新的PID文件
+        fs.writeFileSync(pidFilePath, process.pid.toString());
+
+        // 在进程退出时删除PID文件
+        process.on("exit", () => {
+            try {
+                fs.unlinkSync(pidFilePath);
+            } catch (error) {
+                // 忽略删除错误
+            }
+        });
+
+        // 在收到终止信号时删除PID文件
+        process.on("SIGINT", () => {
+            try {
+                fs.unlinkSync(pidFilePath);
+            } catch (error) {
+                // 忽略删除错误
+            }
+            process.exit(0);
+        });
+
+        process.on("SIGTERM", () => {
+            try {
+                fs.unlinkSync(pidFilePath);
+            } catch (error) {
+                // 忽略删除错误
+            }
+            process.exit(0);
+        });
     }
 
     private async init(): Promise<void> {
@@ -1032,7 +1105,94 @@ class DormStoreSystem {
             else {
                 // 退出经营模式前，展示当前累计实付现金（不含积分）
                 this.showCurrentSessionCashRevenue(user.shortName);
+
+                // 满消费送商品计算
+                this.calculateGiftPromotion(user.shortName);
                 break;
+            }
+        }
+    }
+
+    /**
+     * 满消费送商品计算
+     * @param userShortName 用户简称
+     */
+    private calculateGiftPromotion(userShortName: string): void {
+        // 检查是否启用满消费送商品功能
+        if (!config.GIFT_PROMOTION?.ENABLED) {
+            return;
+        }
+
+        console.log("\n=== 🎁 满消费送商品 ===");
+
+        // 使用系统启动时间作为会话开始时间
+        const sessionStartTime = this.systemStartTime;
+
+        // 计算当前用户在当前会话中的现金订单实付总额
+        const cashOrders = this.data.orders.filter(
+            order =>
+                order.userShortName === userShortName &&
+                order.type === "cash" &&
+                order.timestamp >= sessionStartTime,
+        );
+
+        // 计算实付现金总额（扣除退款）
+        let totalPaidCash = 0;
+
+        cashOrders.forEach(order => {
+            // 找到该订单的所有退款
+            const orderRefunds = this.data.refunds.filter(
+                refund => refund.originalOrderId === order.id,
+            );
+
+            // 计算该订单的总退款金额
+            const totalRefund = orderRefunds.reduce(
+                (sum, refund) => sum + refund.refundCash,
+                0,
+            );
+
+            // 计算该订单的实际有效金额
+            const effectiveAmount = Math.max(0, order.paidCash - totalRefund);
+            totalPaidCash += effectiveAmount;
+        });
+
+        // 获取用户的会员等级
+        const memberLevel = this.getUserMemberLevel(userShortName);
+
+        // 只有见习和正式会员参与活动
+        if (memberLevel !== "TRAINEE" && memberLevel !== "OFFICIAL") {
+            return;
+        }
+
+        // 获取赠送策略
+        const strategy = config.GIFT_PROMOTION.STRATEGIES[memberLevel];
+        if (!strategy) {
+            return;
+        }
+
+        // 计算应送数量
+        const giftCount = Math.floor(totalPaidCash / strategy);
+
+        if (giftCount > 0) {
+            // 查找要赠送的商品
+            const giftProduct = this.data.products.find(
+                p => p.id === config.GIFT_PROMOTION.PRODUCT_ID,
+            );
+
+            if (giftProduct) {
+                console.log(
+                    `🎊 恭喜！您在当前会话消费了 ￥${totalPaidCash.toFixed(2)}`,
+                );
+                console.log(
+                    `🎁 应获得赠品: ${giftProduct.name} x ${giftCount} 包`,
+                );
+            } else {
+                console.log(
+                    `🎊 恭喜！您在当前会话消费了 ￥${totalPaidCash.toFixed(2)}`,
+                );
+                console.log(
+                    `🎁 应获得赠品: ${config.GIFT_PROMOTION.PRODUCT_ID} x ${giftCount} 包`,
+                );
             }
         }
     }
@@ -1110,11 +1270,21 @@ class DormStoreSystem {
     // --- 现金购物 ---
     private async handleCashPurchase(user: User): Promise<void> {
         console.log("\n--- 现金货架 ---");
-        // 过滤出有现金价格的商品
-        const cashProducts = this.data.products.filter(
-            p => p.prices[ProductShelf.CASH],
+        // 过滤出有现金价格且库存大于0的商品
+        const availableCashProducts = this.data.products.filter(
+            p =>
+                p.prices[ProductShelf.CASH] &&
+                this.calculateCurrentStock(p.id) > 0,
         );
-        cashProducts.forEach((p, index) => {
+        // 过滤出有现金价格但库存为0的商品
+        const soldOutCashProducts = this.data.products.filter(
+            p =>
+                p.prices[ProductShelf.CASH] &&
+                this.calculateCurrentStock(p.id) === 0,
+        );
+
+        // 显示可购买商品
+        availableCashProducts.forEach((p, index) => {
             console.log(
                 `[${index + 1}] [${p.id}] ${p.name} - ￥${
                     p.prices[ProductShelf.CASH]
@@ -1122,13 +1292,25 @@ class DormStoreSystem {
             );
         });
 
+        // 提示已售罄商品
+        if (soldOutCashProducts.length > 0) {
+            console.log("\n--- 已售罄商品 ---");
+            soldOutCashProducts.forEach(p => {
+                console.log(`[${p.id}] ${p.name} - 已售罄`);
+            });
+        }
+
         const input = await this.ask("输入商品ID/序号: ");
         let prod: Product | undefined;
 
         // 尝试将输入解析为数字（序号）
         const index = parseInt(input);
-        if (!isNaN(index) && index >= 1 && index <= cashProducts.length) {
-            prod = cashProducts[index - 1];
+        if (
+            !isNaN(index) &&
+            index >= 1 &&
+            index <= availableCashProducts.length
+        ) {
+            prod = availableCashProducts[index - 1];
         } else {
             // 否则尝试作为ID查找
             prod = this.data.products.find(p => p.id === input);
@@ -1351,11 +1533,21 @@ class DormStoreSystem {
         }
 
         console.log("\n--- 积分商城 ---");
-        // 过滤出有积分价格的商品
-        const pointsProducts = this.data.products.filter(
-            p => p.prices[ProductShelf.POINTS],
+        // 过滤出有积分价格且库存大于0的商品
+        const availablePointsProducts = this.data.products.filter(
+            p =>
+                p.prices[ProductShelf.POINTS] &&
+                this.calculateCurrentStock(p.id) > 0,
         );
-        pointsProducts.forEach((p, index) => {
+        // 过滤出有积分价格但库存为0的商品
+        const soldOutPointsProducts = this.data.products.filter(
+            p =>
+                p.prices[ProductShelf.POINTS] &&
+                this.calculateCurrentStock(p.id) === 0,
+        );
+
+        // 显示可购买商品
+        availablePointsProducts.forEach((p, index) => {
             const pointsPrice = p.prices[ProductShelf.POINTS];
             if (pointsPrice !== undefined) {
                 console.log(
@@ -1366,13 +1558,25 @@ class DormStoreSystem {
             }
         });
 
+        // 提示已售罄商品
+        if (soldOutPointsProducts.length > 0) {
+            console.log("\n--- 已售罄商品 ---");
+            soldOutPointsProducts.forEach(p => {
+                console.log(`[${p.id}] ${p.name} - 已售罄`);
+            });
+        }
+
         const input = await this.ask("输入商品ID/序号: ");
         let prod: Product | undefined;
 
         // 尝试将输入解析为数字（序号）
         const index = parseInt(input);
-        if (!isNaN(index) && index >= 1 && index <= pointsProducts.length) {
-            prod = pointsProducts[index - 1];
+        if (
+            !isNaN(index) &&
+            index >= 1 &&
+            index <= availablePointsProducts.length
+        ) {
+            prod = availablePointsProducts[index - 1];
         } else {
             // 否则尝试作为ID查找
             prod = this.data.products.find(p => p.id === input);
@@ -1471,10 +1675,11 @@ class DormStoreSystem {
             console.log(
                 `当前活动预算: ${this.getActivityBudget().toFixed(2)} 积分`,
             );
-            console.log("1. 商品看板  2. 活动看板  3. 顾客看板");
-            console.log("4. 资产/赊账管理  5. 库存管理  6. 退款业务");
             console.log(
-                "7. 活动预算管理  8. 收入情况  9. 导出欠债名单  10. 校验码反查  11. 退出",
+                `1. 商品看板  2. 活动看板  3. 顾客看板
+4. 资产/赊账管理  5. 库存管理  6. 退款业务
+7. 活动预算管理  8. 收入情况  9. 导出欠债名单
+10. 校验码反查  11. 查询顾客消费记录  12. 退出`,
             );
 
             const opt = await this.ask("请选择: ");
@@ -1489,12 +1694,18 @@ class DormStoreSystem {
             else if (opt === "8") this.showRevenueOverview();
             else if (opt === "9") await this.exportDebtorList();
             else if (opt === "10") await this.reverseLookupVerifyCode();
+            else if (opt === "11") await this.queryCustomerConsumption();
             else break;
         }
     }
 
     private showProductDashboard() {
         console.log("\n--- 商品看板 ---");
+
+        // 计算最近2小时的起始时间
+        const twoHoursAgo = new Date();
+        twoHoursAgo.setHours(twoHoursAgo.getHours() - 2);
+
         this.data.products.forEach(p => {
             console.log(`${p.name} [${p.id}]`);
             console.log(
@@ -1534,7 +1745,17 @@ class DormStoreSystem {
                 )
                 .reduce((total, order) => total + order.quantity, 0);
 
+            // 计算最近2小时销量
+            const twoHourSales = this.data.orders
+                .filter(
+                    order =>
+                        order.productId === p.id &&
+                        order.timestamp >= twoHoursAgo,
+                )
+                .reduce((total, order) => total + order.quantity, 0);
+
             console.log(`  本周销量: ${weeklySales} 件`);
+            console.log(`  近2小时销量: ${twoHourSales} 件`);
         });
     }
 
@@ -2332,6 +2553,160 @@ class DormStoreSystem {
         });
 
         console.log("\n✅ 赊账名单已显示在控制台");
+    }
+
+    /**
+     * 查询指定顾客21天消费记录
+     */
+    public async queryCustomerConsumption(): Promise<void> {
+        console.log("\n=== 🔍 查询顾客消费记录 ===");
+
+        const shortName = await this.ask("请输入顾客简称: ");
+        const user = this.data.users.find(u => u.shortName === shortName);
+
+        if (!user) {
+            console.log("❌ 用户不存在");
+            return;
+        }
+
+        // 计算21天前的日期
+        const twentyOneDaysAgo = new Date();
+        twentyOneDaysAgo.setDate(twentyOneDaysAgo.getDate() - 21);
+        twentyOneDaysAgo.setHours(0, 0, 0, 0);
+
+        // 获取该用户在21天内的所有订单
+        const userOrdersInPeriod = this.data.orders
+            .filter(
+                o =>
+                    o.userShortName === shortName &&
+                    new Date(o.timestamp) >= twentyOneDaysAgo,
+            )
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()); // 按时间正序排列
+
+        if (userOrdersInPeriod.length === 0) {
+            console.log(
+                `\n用户 ${shortName} (${this.getRealName(shortName)}) 在过去21天内无消费记录`,
+            );
+            return;
+        }
+
+        // 显示用户基本信息
+        const memberLevel = this.getUserMemberLevel(shortName);
+        const memberStatus =
+            memberLevel === "SPECIAL"
+                ? "特殊用户"
+                : memberLevel === "OFFICIAL"
+                  ? "正式会员"
+                  : memberLevel === "TRAINEE"
+                    ? "见习会员"
+                    : "非会员";
+
+        console.log(`\n--- 用户信息 ---`);
+        console.log(`简称: ${shortName}`);
+        console.log(`真实姓名: ${this.getRealName(shortName)}`);
+        console.log(`会员状态: ${memberStatus}`);
+        console.log(`当前积分: ${user.points}`);
+        console.log(`当前欠款: ￥${user.debt.toFixed(2)}`);
+
+        // 计算消费统计
+        let totalCashSpent = 0;
+        let totalPointsSpent = 0;
+        let totalRewardPoints = 0;
+        let totalRefundCash = 0;
+        let totalRefundPoints = 0;
+        let totalDeductedPoints = 0;
+
+        // 显示消费记录
+        console.log(
+            `\n--- 21天消费记录 (共${userOrdersInPeriod.length}笔) ---`,
+        );
+        console.log(
+            "订单号\t\t时间\t\t\t商品\t\t\t类型\t数量\t实付金额\t奖励积分\t备注",
+        );
+        console.log("-".repeat(120));
+
+        userOrdersInPeriod.forEach(order => {
+            // 查找该订单的退款记录
+            const refunds = this.data.refunds.filter(
+                r => r.originalOrderId === order.id,
+            );
+            const refundCash = refunds.reduce(
+                (sum, r) => sum + r.refundCash,
+                0,
+            );
+            const refundPoints = refunds.reduce(
+                (sum, r) => sum + r.refundPoints,
+                0,
+            );
+            const deductedPoints = refunds.reduce(
+                (sum, r) => sum + r.deductPoints,
+                0,
+            );
+
+            // 累计统计
+            totalCashSpent += order.paidCash - refundCash;
+            totalPointsSpent += order.paidPoints - refundPoints;
+            totalRewardPoints += order.rewardPoints - deductedPoints;
+            totalRefundCash += refundCash;
+            totalRefundPoints += refundPoints;
+            totalDeductedPoints += deductedPoints;
+
+            // 格式化显示
+            const orderType = order.type === "cash" ? "现金" : "积分";
+            const payment =
+                order.type === "cash"
+                    ? `￥${(order.paidCash - refundCash).toFixed(2)}`
+                    : `${(order.paidPoints - refundPoints).toFixed(2)}积分`;
+            const rewardPoints = order.rewardPoints - deductedPoints;
+
+            // 截断过长的商品名称
+            const productName =
+                order.productName.length > 10
+                    ? order.productName.substring(0, 9) + "..."
+                    : order.productName;
+
+            console.log(
+                `${order.id}\t${order.timestamp.toLocaleString("zh-CN")}\t${productName}\t\t${orderType}\t${order.quantity}\t${payment}\t\t${rewardPoints}\t\t${order.note || ""}`,
+            );
+        });
+
+        // 显示退款记录
+        if (totalRefundCash > 0 || totalRefundPoints > 0) {
+            console.log("\n--- 退款记录 ---");
+            if (totalRefundCash > 0) {
+                console.log(`退款现金: ￥${totalRefundCash.toFixed(2)}`);
+            }
+            if (totalRefundPoints > 0) {
+                console.log(`退款积分: ${totalRefundPoints.toFixed(2)} 积分`);
+            }
+            console.log(`扣除奖励积分: ${totalDeductedPoints} 积分`);
+        }
+
+        // 显示消费统计
+        console.log("\n--- 消费统计 ---");
+        console.log(`实付现金: ￥${totalCashSpent.toFixed(2)}`);
+        console.log(`实付积分: ${totalPointsSpent.toFixed(2)} 积分`);
+        console.log(`获得奖励积分: ${totalRewardPoints} 积分`);
+        console.log(
+            `净消费: ￥${(totalCashSpent + totalPointsSpent).toFixed(2)} (现金+积分)`,
+        );
+
+        // 计算21天内消费额（扣除退款）
+        const totalSpendIn21Days = this.getUserTotalSpendInWindow(shortName);
+        console.log(
+            `21天内消费总额: ￥${totalSpendIn21Days.toFixed(2)} (仅现金消费，扣除退款)`,
+        );
+
+        // 显示会员状态相关信息
+        console.log("\n--- 会员状态 ---");
+        console.log(
+            `会员门槛: ￥${config.MEMBER.NEW_RULE.TRIGGER_AMOUNT} (21天内消费)`,
+        );
+        console.log(
+            `距离会员门槛: ￥${Math.max(0, config.MEMBER.NEW_RULE.TRIGGER_AMOUNT - totalSpendIn21Days).toFixed(2)}`,
+        );
+
+        console.log("\n✅ 查询完成");
     }
 
     public start(): void {

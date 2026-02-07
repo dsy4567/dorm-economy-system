@@ -1,0 +1,1 @@
+/home/dsy/dorm-economy-system/.trae/rules/project_rules.md
