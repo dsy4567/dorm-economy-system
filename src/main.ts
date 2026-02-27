@@ -53,6 +53,9 @@
 //      - calculateRewardPoints(): 计算奖励积分（保留完整小数，但用户总积分有上限5）
 //      - showCurrentSessionCashRevenue(): 显示当前会话累计实付现金（扣除退款）
 //      - calculateGiftPromotion(): 计算满消费送商品的数量
+//    - 赊账管理功能
+//      - handleDebtOperation(): 统一处理赊账操作，支持一键赊账和手动赊账
+//      - manageAssets(): 资产/赊账管理（支持手动赊账和积分调整）
 //    - reverseLookupVerifyCode(): 校验码反查订单（从最晚订单向前遍历）
 //    - exportDebtorList(): 在控制台输出赊账名单（包含最后消费时间）
 //    - queryCustomerConsumption(): 查询指定顾客21天消费记录
@@ -1442,6 +1445,21 @@ class DormStoreSystem {
             0,
             rewardPoints,
         );
+
+        // 一键赊账功能（仅适用于现金购物，不适用于积分兑换）
+        if (finalPaidCash > 0) {
+            const debtOption = await this.ask("是否一键赊账？(Y/N, 默认N): ");
+            if (debtOption.toUpperCase() === "Y") {
+                await this.handleDebtOperation(user, finalPaidCash, "auto", {
+                    orderId: orderId,
+                    productName: prod.name,
+                    quantity: qty,
+                    totalCost: finalPaidCash,
+                });
+                console.log("✅ 已自动记录赊账");
+            }
+        }
+
         console.log("✅ 购买成功！");
         console.log(`订单号: ${orderId}`);
         console.log(`校验码: ${verifyCode}`);
@@ -1451,7 +1469,10 @@ class DormStoreSystem {
         console.log(`积分支付: 0`);
         console.log(`奖励积分: ${rewardPoints}`);
         console.log(`校验码: ${verifyCode}`);
-        console.log(`(如需赊账，请前往管理模式手动记录)`);
+
+        if (finalPaidCash > 0) {
+            console.log(`(如需赊账，请前往管理模式手动记录)`);
+        }
 
         // 检查并通知会员状态变化
         this.checkAndNotifyMembershipChange(user.shortName);
@@ -1834,6 +1855,48 @@ class DormStoreSystem {
         });
     }
 
+    // --- 赊账管理功能 ---
+    private async handleDebtOperation(
+        user: User,
+        amount: number,
+        operationType: "manual" | "auto",
+        orderInfo?: {
+            orderId: string;
+            productName: string;
+            quantity: number;
+            totalCost: number;
+        },
+        customNote?: string,
+    ): Promise<void> {
+        const oldDebt = user.debt;
+        const newDebt = user.debt + amount;
+
+        let reason = "";
+
+        if (operationType === "auto") {
+            // 一键赊账：记录订单相关信息
+            if (orderInfo) {
+                reason = `一键赊账 - 订单: ${orderInfo.orderId}, 商品: ${orderInfo.productName} x${orderInfo.quantity}, 金额: ￥${orderInfo.totalCost.toFixed(2)}`;
+            }
+        } else {
+            // 手动赊账：记录基本信息，允许追加自定义备注
+            reason = `手动赊账调整: ${amount}`;
+            if (customNote) {
+                reason += ` - ${customNote}`;
+            }
+        }
+
+        user.debt = newDebt;
+        this.logManualOperation(
+            reason,
+            "debt_adjust",
+            amount,
+            oldDebt,
+            newDebt,
+        );
+        this.saveData();
+    }
+
     // --- 资产/赊账管理 (核心变更) ---
     private async manageAssets(): Promise<void> {
         console.log("\n=== 📝 资产/赊账管理 ===");
@@ -1856,20 +1919,25 @@ class DormStoreSystem {
             const amount = parseFloat(amountStr);
             if (isNaN(amount)) return;
 
-            const oldDebt = user.debt; // 记录赊账前的金额
             const newDebt = user.debt + amount;
             console.log(`操作后欠款将为: ${newDebt}`);
+
+            // 允许手动追加备注
+            let customNote = "";
+            const addNote = await this.ask("是否添加备注？(Y/N, 默认N): ");
+            if (addNote.toUpperCase() === "Y") {
+                customNote = await this.ask("请输入备注: ");
+            }
+
             if ((await this.ask("确认吗？ === 'Y'")) === "Y") {
-                user.debt = newDebt;
-                this.logManualOperation(
-                    `赊账调整: ${amount}`,
-                    "debt_adjust",
+                await this.handleDebtOperation(
+                    user,
                     amount,
-                    oldDebt, // 传递赊账前的金额
-                    newDebt, // 传递赊账后的金额
+                    "manual",
+                    undefined,
+                    customNote,
                 );
-                this.saveData();
-                console.log("✅ 已更新");
+                console.log("✅ 赊账记录已更新");
             }
         } else if (opt === "2") {
             const amountStr = await this.ask(
@@ -2385,12 +2453,60 @@ class DormStoreSystem {
 
         console.log("✅ 退款成功！");
 
-        // --- 关键提醒 ---
+        // --- 关键提醒与一键赊账调整 ---
         if (user.debt > 0) {
             console.log(`\n⚠️ 提示：该用户目前欠款 ￥${user.debt}。`);
             console.log(
-                "   系统已将积分/现金退还至账户，请根据实际情况手动调整赊账记录。",
+                "   系统已将积分/现金退还至账户，请根据实际情况调整赊账记录。",
             );
+
+            // 提供一键赊账调整选项
+            const adjustDebt = await this.ask(
+                "是否立即调整赊账记录？(Y/N, 默认N): ",
+            );
+            if (adjustDebt.toUpperCase() === "Y") {
+                console.log("\n=== 📝 赊账调整 ===");
+                console.log(`当前欠款: ￥${user.debt}`);
+                console.log(`本次退款金额: ￥${refundCash.toFixed(2)}`);
+
+                // 提供调整选项
+                console.log("1. 减少欠款（退款金额抵扣欠款）");
+                console.log("2. 手动输入调整金额");
+                console.log("3. 跳过调整");
+
+                const debtOption = await this.ask("请选择操作: ");
+
+                if (debtOption === "1") {
+                    // 自动减少欠款（退款金额抵扣）
+                    const adjustment = -Math.min(refundCash, user.debt);
+                    await this.handleDebtOperation(
+                        user,
+                        adjustment,
+                        "manual",
+                        undefined,
+                        `退款抵扣 - 订单: ${orderId}, 退款金额: ￥${refundCash.toFixed(2)}`,
+                    );
+                    console.log("✅ 赊账记录已自动调整");
+                } else if (debtOption === "2") {
+                    // 手动输入调整金额
+                    const amountStr = await this.ask(
+                        "输入调整金额 (正=欠我增加, 负=欠我减少): ",
+                    );
+                    const amount = parseFloat(amountStr);
+                    if (!isNaN(amount)) {
+                        await this.handleDebtOperation(
+                            user,
+                            amount,
+                            "manual",
+                            undefined,
+                            `退款相关调整 - 订单: ${orderId}`,
+                        );
+                        console.log("✅ 赊账记录已手动调整");
+                    }
+                } else {
+                    console.log("已跳过赊账调整");
+                }
+            }
         }
     }
 
@@ -2407,27 +2523,16 @@ class DormStoreSystem {
         // 使用所有订单进行统计（特殊用户订单正常计入营销数据）
         const validOrders = this.data.orders;
 
-        // 计算总收入
-        const cashRevenue = validOrders
+        // 计算累计实收现金和积分
+        const totalCashRevenue = validOrders
             .filter(o => o.type === "cash")
             .reduce((sum, order) => sum + order.paidCash, 0);
 
-        const pointsRevenue = validOrders
+        const totalPointsRevenue = validOrders
             .filter(o => o.type === "points")
             .reduce((sum, order) => sum + order.paidPoints, 0);
 
-        // 计算总成本
-        const totalCost = validOrders.reduce(
-            (sum, order) => sum + order.cost,
-            0,
-        );
-
-        // 计算总利润
-        // 汇率统一度量：取消0.01折算率，严格遵守1人民币=1积分
-        const totalRevenue = cashRevenue + pointsRevenue; // 积分直接1:1统计
-        const totalProfit = totalRevenue - totalCost;
-
-        // 计算周期内收入（上周日到现在）
+        // 计算周期内实收现金和积分
         const periodCashRevenue = validOrders
             .filter(
                 o => o.type === "cash" && new Date(o.timestamp) >= lastSunday,
@@ -2440,14 +2545,60 @@ class DormStoreSystem {
             )
             .reduce((sum, order) => sum + order.paidPoints, 0);
 
-        // 计算周期内成本
-        const periodCost = validOrders
-            .filter(o => new Date(o.timestamp) >= lastSunday)
-            .reduce((sum, order) => sum + order.cost, 0);
+        // 计算现金订单的赠送积分总和
+        const totalRewardPoints = validOrders
+            .filter(o => o.type === "cash")
+            .reduce((sum, order) => sum + order.rewardPoints, 0);
 
-        // 计算周期内利润
-        const periodTotalRevenue = periodCashRevenue + periodPointsRevenue; // 积分直接1:1统计
-        const periodProfit = periodTotalRevenue - periodCost;
+        // 计算现金利润：现金购物时实付金额 - 成本 - 赠送积分
+        const cashProfit =
+            totalCashRevenue -
+            validOrders
+                .filter(o => o.type === "cash")
+                .reduce((sum, order) => sum + order.cost, 0) -
+            totalRewardPoints;
+
+        // 计算积分利润：积分兑换时实付积分 - 成本
+        const pointsProfit =
+            totalPointsRevenue -
+            validOrders
+                .filter(o => o.type === "points")
+                .reduce((sum, order) => sum + order.cost, 0);
+
+        // 计算总利润：现金利润 + 积分利润
+        const totalProfit = cashProfit + pointsProfit;
+
+        // 计算周期内现金利润
+        const periodCashProfit =
+            periodCashRevenue -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "cash" &&
+                        new Date(o.timestamp) >= lastSunday,
+                )
+                .reduce((sum, order) => sum + order.cost, 0) -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "cash" &&
+                        new Date(o.timestamp) >= lastSunday,
+                )
+                .reduce((sum, order) => sum + order.rewardPoints, 0);
+
+        // 计算周期内积分利润
+        const periodPointsProfit =
+            periodPointsRevenue -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "points" &&
+                        new Date(o.timestamp) >= lastSunday,
+                )
+                .reduce((sum, order) => sum + order.cost, 0);
+
+        // 计算周期内总利润
+        const periodProfit = periodCashProfit + periodPointsProfit;
 
         console.log(
             `📅 统计周期: 上周日(${
@@ -2456,17 +2607,22 @@ class DormStoreSystem {
                 now.getMonth() + 1
             }月${now.getDate()}日`,
         );
-        console.log("\n📊 周期内收入统计:");
-        console.log(`周期内现金收入: ￥${periodCashRevenue.toFixed(2)}`);
-        console.log(`周期内积分收入: ${periodPointsRevenue} 积分`);
-        console.log(`周期内总成本: ￥${periodCost.toFixed(2)}`);
+        console.log("\n📊 周期内实收统计:");
+        console.log(`周期内实收现金: ￥${periodCashRevenue.toFixed(2)}`);
+        console.log(`周期内实收积分: ${periodPointsRevenue} 积分`);
+        console.log("\n📊 周期内利润统计:");
+        console.log(`周期内现金利润: ￥${periodCashProfit.toFixed(2)}`);
+        console.log(`周期内积分利润: ${periodPointsProfit} 积分`);
         console.log(`周期内总利润: ￥${periodProfit.toFixed(2)}`);
 
-        console.log("\n📊 累计收入统计:");
-        console.log(`累计现金收入: ￥${cashRevenue.toFixed(2)}`);
-        console.log(`累计积分收入: ${pointsRevenue} 积分`);
-        console.log(`累计总成本: ￥${totalCost.toFixed(2)}`);
+        console.log("\n📊 累计实收统计:");
+        console.log(`累计实收现金: ￥${totalCashRevenue.toFixed(2)}`);
+        console.log(`累计实收积分: ${totalPointsRevenue} 积分`);
+        console.log("\n📊 累计利润统计:");
+        console.log(`累计现金利润: ￥${cashProfit.toFixed(2)}`);
+        console.log(`累计积分利润: ${pointsProfit} 积分`);
         console.log(`累计总利润: ￥${totalProfit.toFixed(2)}`);
+        console.log(`累计赠送积分: ${totalRewardPoints} 积分`);
 
         // 特殊用户成本统计
         const specialUserOrders = validOrders.filter(order =>
