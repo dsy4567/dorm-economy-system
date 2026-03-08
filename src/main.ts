@@ -49,7 +49,7 @@
 //      - checkAndNotifyMembershipChange(): 检查并通知会员状态变化
 //      - checkMembershipStatus(): 检查会员状态
 //      - generateVerifyCode(): 生成校验码
-//      - showRevenueOverview(): 显示收入情况分析
+//      - showRevenueOverview(): 显示收入情况分析（包含上周期统计）
 //      - calculateRewardPoints(): 计算奖励积分（保留完整小数，但用户总积分有上限5）
 //      - showCurrentSessionCashRevenue(): 显示当前会话累计实付现金（扣除退款）
 //      - calculateGiftPromotion(): 计算满消费送商品的数量
@@ -2520,6 +2520,11 @@ class DormStoreSystem {
         lastSunday.setDate(now.getDate() - (dayOfWeek === 0 ? 7 : dayOfWeek));
         lastSunday.setHours(0, 0, 0, 0);
 
+        // 计算上周期（两周前的周日到上周日）
+        const previousPeriodStart = new Date(lastSunday);
+        previousPeriodStart.setDate(lastSunday.getDate() - 7);
+        previousPeriodStart.setHours(0, 0, 0, 0);
+
         // 使用所有订单进行统计（特殊用户订单正常计入营销数据）
         const validOrders = this.data.orders;
 
@@ -2542,6 +2547,25 @@ class DormStoreSystem {
         const periodPointsRevenue = validOrders
             .filter(
                 o => o.type === "points" && new Date(o.timestamp) >= lastSunday,
+            )
+            .reduce((sum, order) => sum + order.paidPoints, 0);
+
+        // 计算上周期实收现金和积分
+        const previousPeriodCashRevenue = validOrders
+            .filter(
+                o =>
+                    o.type === "cash" &&
+                    new Date(o.timestamp) >= previousPeriodStart &&
+                    new Date(o.timestamp) < lastSunday,
+            )
+            .reduce((sum, order) => sum + order.paidCash, 0);
+
+        const previousPeriodPointsRevenue = validOrders
+            .filter(
+                o =>
+                    o.type === "points" &&
+                    new Date(o.timestamp) >= previousPeriodStart &&
+                    new Date(o.timestamp) < lastSunday,
             )
             .reduce((sum, order) => sum + order.paidPoints, 0);
 
@@ -2600,6 +2624,42 @@ class DormStoreSystem {
         // 计算周期内总利润
         const periodProfit = periodCashProfit + periodPointsProfit;
 
+        // 计算上周期现金利润
+        const previousPeriodCashProfit =
+            previousPeriodCashRevenue -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "cash" &&
+                        new Date(o.timestamp) >= previousPeriodStart &&
+                        new Date(o.timestamp) < lastSunday,
+                )
+                .reduce((sum, order) => sum + order.cost, 0) -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "cash" &&
+                        new Date(o.timestamp) >= previousPeriodStart &&
+                        new Date(o.timestamp) < lastSunday,
+                )
+                .reduce((sum, order) => sum + order.rewardPoints, 0);
+
+        // 计算上周期积分利润
+        const previousPeriodPointsProfit =
+            previousPeriodPointsRevenue -
+            validOrders
+                .filter(
+                    o =>
+                        o.type === "points" &&
+                        new Date(o.timestamp) >= previousPeriodStart &&
+                        new Date(o.timestamp) < lastSunday,
+                )
+                .reduce((sum, order) => sum + order.cost, 0);
+
+        // 计算上周期总利润
+        const previousPeriodProfit =
+            previousPeriodCashProfit + previousPeriodPointsProfit;
+
         console.log(
             `📅 统计周期: 上周日(${
                 lastSunday.getMonth() + 1
@@ -2607,6 +2667,26 @@ class DormStoreSystem {
                 now.getMonth() + 1
             }月${now.getDate()}日`,
         );
+
+        // 显示上周期统计
+        console.log("\n📊 上周期收入情况（相对于当前周期）:");
+        console.log(
+            `📅 上周期: 两周前周日(${
+                previousPeriodStart.getMonth() + 1
+            }月${previousPeriodStart.getDate()}日)至上周日(${
+                lastSunday.getMonth() + 1
+            }月${lastSunday.getDate()}日)`,
+        );
+        console.log("\n📊 上周期实收统计:");
+        console.log(
+            `上周期实收现金: ￥${previousPeriodCashRevenue.toFixed(2)}`,
+        );
+        console.log(`上周期实收积分: ${previousPeriodPointsRevenue} 积分`);
+        console.log("\n📊 上周期利润统计:");
+        console.log(`上周期现金利润: ￥${previousPeriodCashProfit.toFixed(2)}`);
+        console.log(`上周期积分利润: ${previousPeriodPointsProfit} 积分`);
+        console.log(`上周期总利润: ￥${previousPeriodProfit.toFixed(2)}`);
+
         console.log("\n📊 周期内实收统计:");
         console.log(`周期内实收现金: ￥${periodCashRevenue.toFixed(2)}`);
         console.log(`周期内实收积分: ${periodPointsRevenue} 积分`);
@@ -2637,8 +2717,18 @@ class DormStoreSystem {
             const specialUserPeriodCost = specialUserOrders
                 .filter(order => new Date(order.timestamp) >= lastSunday)
                 .reduce((sum, order) => sum + order.cost, 0);
+            const specialUserPreviousPeriodCost = specialUserOrders
+                .filter(
+                    order =>
+                        new Date(order.timestamp) >= previousPeriodStart &&
+                        new Date(order.timestamp) < lastSunday,
+                )
+                .reduce((sum, order) => sum + order.cost, 0);
 
             console.log("\n⭐ 特殊用户成本统计:");
+            console.log(
+                `上周期特殊用户成本: ￥${specialUserPreviousPeriodCost.toFixed(2)}`,
+            );
             console.log(
                 `周期内特殊用户成本: ￥${specialUserPeriodCost.toFixed(2)}`,
             );
