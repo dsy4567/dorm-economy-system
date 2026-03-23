@@ -53,6 +53,7 @@
 //      - calculateRewardPoints(): 计算奖励积分（保留完整小数，但用户总积分有上限5）
 //      - showCurrentSessionCashRevenue(): 显示当前会话累计实付现金（扣除退款）
 //      - calculateGiftPromotion(): 计算满消费送商品的数量
+//      - showPointsExchangeOptions(): 离店时显示积分兑换商品选项
 //    - 赊账管理功能
 //      - handleDebtOperation(): 统一处理赊账操作，支持一键赊账和手动赊账
 //      - manageAssets(): 资产/赊账管理（支持手动赊账和积分调整）
@@ -1111,6 +1112,9 @@ class DormStoreSystem {
 
                 // 满消费送商品计算
                 this.calculateGiftPromotion(user.shortName);
+
+                // 离店时显示积分兑换商品
+                this.showPointsExchangeOptions(user);
                 break;
             }
         }
@@ -1871,16 +1875,16 @@ class DormStoreSystem {
         const oldDebt = user.debt;
         const newDebt = user.debt + amount;
 
-        let reason = "";
+        let reason = `顾客: ${user.shortName} - `;
 
         if (operationType === "auto") {
             // 一键赊账：记录订单相关信息
             if (orderInfo) {
-                reason = `一键赊账 - 订单: ${orderInfo.orderId}, 商品: ${orderInfo.productName} x${orderInfo.quantity}, 金额: ￥${orderInfo.totalCost.toFixed(2)}`;
+                reason += `一键赊账 - 订单: ${orderInfo.orderId}, 商品: ${orderInfo.productName} x${orderInfo.quantity}, 金额: ￥${orderInfo.totalCost.toFixed(2)}`;
             }
         } else {
             // 手动赊账：记录基本信息，允许追加自定义备注
-            reason = `手动赊账调整: ${amount}`;
+            reason += `手动赊账调整: ${amount}`;
             if (customNote) {
                 reason += ` - ${customNote}`;
             }
@@ -3060,8 +3064,23 @@ class DormStoreSystem {
                         ? order.productName.substring(0, 9) + "..."
                         : order.productName;
 
+                // 计算退款状态
+                let refundStatus = "";
+                if (refunds.length > 0) {
+                    // 计算已退款数量
+                    const refundedQuantity = refunds.reduce(
+                        (sum, r) => sum + r.quantity,
+                        0,
+                    );
+                    if (refundedQuantity >= order.quantity) {
+                        refundStatus = " [全额退款]";
+                    } else {
+                        refundStatus = ` [部分退款: ${refundedQuantity}/${order.quantity}]`;
+                    }
+                }
+
                 console.log(
-                    `   ${order.timestamp.toLocaleTimeString("zh-CN")} ${productName} x${order.quantity} ${orderType} ${payment}`,
+                    `   ${order.timestamp.toLocaleTimeString("zh-CN")} ${productName} x${order.quantity} ${orderType} ${payment} ${refundStatus} (订单号: ${order.id})`,
                 );
             });
 
@@ -3107,6 +3126,49 @@ class DormStoreSystem {
         );
 
         console.log("\n✅ 查询完成");
+    }
+
+    /**
+     * 离店时显示本次进店已经兑换过的商品
+     * @param user 用户信息
+     */
+    private showPointsExchangeOptions(user: User): void {
+        console.log("\n=== 🎁 本次进店积分兑换商品 ===");
+
+        // 获取用户本次进店的订单
+        const currentVisitOrders = this.getCurrentVisitOrders(user.shortName);
+
+        if (currentVisitOrders.length === 0) {
+            console.log("您当前不在店内，或本次进店暂无订单");
+            return;
+        }
+
+        // 筛选本次进店的积分订单
+        const pointsOrders = currentVisitOrders.filter(
+            order => order.type === "points",
+        );
+
+        if (pointsOrders.length === 0) {
+            console.log("本次进店暂无积分兑换记录");
+            return;
+        }
+
+        console.log("本次进店已兑换的商品：");
+        console.log("\n--- 积分兑换记录 ---\n");
+
+        pointsOrders.forEach((order, index) => {
+            console.log(
+                `[${index + 1}] ${order.timestamp.toLocaleTimeString("zh-CN")} ${order.productName} x${order.quantity} - 消耗积分: ${order.paidPoints.toFixed(2)} (订单号: ${order.id})`,
+            );
+        });
+
+        // 计算本次进店总共消耗的积分
+        const totalPointsSpent = pointsOrders.reduce(
+            (sum, order) => sum + order.paidPoints,
+            0,
+        );
+        console.log(`\n本次进店共消耗积分: ${totalPointsSpent.toFixed(2)}`);
+        console.log(`当前剩余积分: ${user.points}`);
     }
 
     public start(): void {
